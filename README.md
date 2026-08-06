@@ -1,7 +1,7 @@
 # 🛡️ `mpro`: Cyber-Physical Real-Time Thermal Control Engine for Mac Pro 4,1 & 5,1
 
 [![Rust](https://img.shields.io/badge/rust-1.96%2B-blue.svg)](https://www.rust-lang.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPLv3%2B-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Linux%20x86__64-green.svg)](https://kernel.org)
 
 `mpro` is an ultra-fast, zero-copy, multi-worker **Cyber-Physical Thermal Control & Stability Engine** written in Rust, specifically architected for **Apple Mac Pro 4,1 (flashed to 5,1)** and **Mac Pro 5,1** dual-socket Intel Xeon workstations running Linux.
@@ -116,4 +116,4 @@ sudo systemctl enable --now mpro.service
 
 ## 📄 License
 
-MIT License. See [LICENSE](LICENSE) for details.
+GNU General Public License v3.0 or later (GPL-3.0-or-later / GPLv3+). See [LICENSE](LICENSE) for details.

@@ -2,8 +2,9 @@
 name = "mpro"
 version = "1.0.0"
 edition = "2021"
-authors = ["Michael <michael@MacPro5-1>"]
+authors = ["Michael Faille <michael@mikefaille.com>"]
 description = "Pure Zero-Copy Tokio Async Cyber-Physical Thermal Engine in Rust"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 libc = "0.2"
