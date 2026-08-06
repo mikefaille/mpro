@@ -1,8 +1,10 @@
 use wide::f64x2;
 
 /// 2D Extended Kalman Filter (EKF) with Full eSIMD Vectorization.
-/// Uses 128-bit vector registers (wide::f64x2) for state vector prediction and covariance updates.
+/// Implements continuous-discrete Wiener acceleration process noise model
+/// for optimal thermal state estimation on Mac Pro hardware.
 pub struct ExtendedKalmanThermalFilter {
+    initialized: bool,
     dt: f64,
     x0: f64, // Estimated Temperature (°C)
     x1: f64, // Estimated Derivative Rate-of-Change (°C/sec)
@@ -11,13 +13,19 @@ pub struct ExtendedKalmanThermalFilter {
     p_row1: f64x2, // [p10, p11]
 
     q00: f64,
+    q01: f64,
     q11: f64,
     r_meas: f64,
 }
 
 impl ExtendedKalmanThermalFilter {
     pub fn new(dt: f64) -> Self {
+        let sw = 0.015; // Process noise spectral density (K^2/s^3)
+        let dt2 = (dt * dt) / 2.0;
+        let dt3 = (dt * dt * dt) / 3.0;
+
         Self {
+            initialized: false,
             dt,
             x0: 50.0,
             x1: 0.0,
@@ -25,14 +33,22 @@ impl ExtendedKalmanThermalFilter {
             p_row0: f64x2::from([1.0, 0.0]),
             p_row1: f64x2::from([0.0, 1.0]),
 
-            q00: 1e-3,
-            q11: 1e-2,
-            r_meas: 0.5,
+            q00: dt3 * sw, // 0.0050 for dt=1.0
+            q01: dt2 * sw, // 0.0075 for dt=1.0
+            q11: dt * sw,  // 0.0150 for dt=1.0
+            r_meas: 0.50,  // Physical Apple SMC sensor variance
         }
     }
 
     #[inline(always)]
     pub fn update(&mut self, z_meas: f64) -> (f64, f64) {
+        if !self.initialized {
+            self.x0 = z_meas;
+            self.x1 = 0.0;
+            self.initialized = true;
+            return (self.x0, self.x1);
+        }
+
         // 1. eSIMD State Prediction: [x0 + dt*x1, x1]
         let vec_x = f64x2::from([self.x0, self.x1]);
         let vec_dt = f64x2::from([self.dt * self.x1, 0.0]);
@@ -50,12 +66,12 @@ impl ExtendedKalmanThermalFilter {
         let p10 = p1[0];
         let p11 = p1[1];
 
-        // 2. Fused Vector Covariance Prediction
+        // 2. Fused Vector Covariance Prediction (incorporating Q01 off-diagonal coupling)
         let dt_vec = f64x2::splat(self.dt);
         let p1_vec = f64x2::from([p10, p11]);
 
-        let p0_pred = f64x2::from([p00, p01]) + dt_vec * p1_vec + f64x2::from([self.q00, 0.0]);
-        let p1_pred = p1_vec + f64x2::from([0.0, self.q11]);
+        let p0_pred = f64x2::from([p00, p01]) + dt_vec * p1_vec + f64x2::from([self.q00, self.q01]);
+        let p1_pred = p1_vec + f64x2::from([self.q01, self.q11]);
 
         let p0_arr: [f64; 2] = p0_pred.into();
         let p00_p = p0_arr[0];

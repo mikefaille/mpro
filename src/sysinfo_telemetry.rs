@@ -72,6 +72,27 @@ impl FastPosixThermalEngine {
         }
     }
 
+    #[inline(always)]
+    fn pread_fast_raw_val(fd: RawFd) -> f64 {
+        if fd < 0 {
+            return 0.0;
+        }
+        let mut buf = [0u8; 16];
+        let n = unsafe { libc::pread(fd, buf.as_mut_ptr() as *mut libc::c_void, 16, 0) };
+        if n <= 0 {
+            return 0.0;
+        }
+        let mut val = 0i64;
+        for &b in &buf[..n as usize] {
+            if b >= b'0' && b <= b'9' {
+                val = val * 10 + (b - b'0') as i64;
+            } else if val > 0 {
+                break;
+            }
+        }
+        val as f64
+    }
+
     /// Pure Zero-Copy POSIX thermal read (< 500 nanoseconds, ZERO CPU spikes).
     #[inline(always)]
     pub fn sample_thermal_fast(&mut self) -> ThermalSnapshot {
@@ -79,7 +100,7 @@ impl FastPosixThermalEngine {
         let cpu0 = Self::pread_fast_milli_celsius(self.fd_cpu0);
         let cpu1 = Self::pread_fast_milli_celsius(self.fd_cpu1);
         let inlet = Self::pread_fast_milli_celsius(self.fd_inlet);
-        let fan = Self::pread_fast_milli_celsius(self.fd_fan);
+        let fan = Self::pread_fast_raw_val(self.fd_fan);
 
         ThermalSnapshot {
             tn0d_temp: if tn0d > 0.0 { tn0d } else { 50.0 },

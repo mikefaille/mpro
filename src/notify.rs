@@ -39,6 +39,11 @@ pub async fn send_gchat_notification_async(client: &reqwest::Client, title: &str
 }
 
 pub fn send_desktop_notification(title: &str, message: &str) {
+    let bus_path = std::path::Path::new("/run/user/1000/bus");
+    if !bus_path.exists() {
+        return; // Skip desktop notify if user session bus is not active
+    }
+
     let _ = Command::new("runuser")
         .args([
             "-u",

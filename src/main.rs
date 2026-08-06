@@ -1,3 +1,4 @@
+mod config;
 mod control;
 mod dbus;
 mod ekf;
@@ -7,7 +8,8 @@ mod status;
 mod sysinfo_telemetry;
 
 use clap::Parser;
-use control::compute_cyber_physical_control;
+use config::ThermalConfig;
+use control::{compute_cyber_physical_control, compute_cyber_physical_control_with_config};
 use dbus::{reset_all_hardware_overrides, set_hardware_sysfs_override, MbpFanDbusClient};
 use ekf::ExtendedKalmanThermalFilter;
 use ml_hazard::{evaluate_fast_hazard, HazardResult};
@@ -47,31 +49,87 @@ struct Args {
     /// Control loop interval in seconds (default: 1.0s)
     #[arg(short, long, default_value_t = 1.0)]
     interval: f64,
+
+    /// Hour when acoustic night window begins (0-23)
+    #[arg(long)]
+    night_start: Option<u32>,
+
+    /// Hour when acoustic night window ends (0-23)
+    #[arg(long)]
+    night_end: Option<u32>,
+
+    /// Path to configuration file (default: /etc/mpro.conf)
+    #[arg(long, default_value = "/etc/mpro.conf")]
+    config: String,
 }
 
+use std::hint::black_box;
+
 fn run_micro_benchmark() {
-    println!("⚡ [Nanosecond Rust mpro Benchmark] Testing Zero-Copy POSIX Loop Speed...");
+    println!("=========================================================");
+    println!("⚡ HIGH-PRECISION NANOSECOND Rust mpro BENCHMARK");
+    println!("=========================================================");
 
-    let mut engine = FastPosixThermalEngine::new();
-    let mut ekf = ExtendedKalmanThermalFilter::new(0.1);
+    let mut ekf = ExtendedKalmanThermalFilter::new(1.0);
+    let iterations = 10_000_000;
 
-    let iterations = 100_000;
-    let start = Instant::now();
-
-    for _ in 0..iterations {
-        let snap = engine.sample_thermal_fast();
-        let (t_est, dt_est) = ekf.update(snap.tn0d_temp);
-        let hazard = evaluate_fast_hazard(t_est, dt_est, snap.cpu0_temp);
-        let _decision = compute_cyber_physical_control(t_est, dt_est, snap.cpu0_temp, &hazard);
+    // Warmup phase (100,000 iterations to prime CPU L1 instruction cache)
+    for i in 0..100_000 {
+        let dummy = black_box(50.0 + ((i & 0x1F) as f64 * 0.1));
+        let (t, dt) = ekf.update(dummy);
+        let h = evaluate_fast_hazard(t, dt, 48.0);
+        let d = compute_cyber_physical_control(t, dt, 48.0, &h);
+        black_box(d);
     }
 
-    let elapsed = start.elapsed();
-    let total_secs = elapsed.as_secs_f64();
-    let us_per_op = (total_secs / iterations as f64) * 1e6;
+    // 1. Full EKF + ML Hazard + Control Decision Pipeline Benchmark
+    let start_pipe = Instant::now();
+    for i in 0..iterations {
+        let z = black_box(50.0 + ((i & 0x3F) as f64 * 0.05));
+        let (t_est, dt_est) = ekf.update(z);
+        let hazard = evaluate_fast_hazard(black_box(t_est), black_box(dt_est), black_box(48.0));
+        let decision = compute_cyber_physical_control(black_box(t_est), black_box(dt_est), black_box(48.0), &hazard);
+        black_box(decision);
+    }
+    let pipe_elapsed_ns = start_pipe.elapsed().as_nanos() as f64;
+    let ns_per_pipe = pipe_elapsed_ns / iterations as f64;
 
-    println!("✅ Executed {iterations} zero-copy control ticks in {total_secs:.4} seconds.");
-    println!("🚀 Average Loop Latency: {us_per_op:.3} microseconds (μs) per tick!");
-    println!("📊 Maximum Throughput : {:.0} evaluations / second!", 1e6 / us_per_op);
+    // 2. Pure EKF eSIMD Math Loop Benchmark
+    let start_ekf = Instant::now();
+    for i in 0..iterations {
+        let z = black_box(50.0 + ((i & 0x3F) as f64 * 0.05));
+        let res = ekf.update(z);
+        black_box(res);
+    }
+    let ekf_elapsed_ns = start_ekf.elapsed().as_nanos() as f64;
+    let ns_per_ekf = ekf_elapsed_ns / iterations as f64;
+
+    // 3. Fast POSIX Sysfs Kernel Hardware Read (10,000 iterations)
+    let hw_iterations = 10_000;
+    let mut engine = FastPosixThermalEngine::new();
+    let start_hw = Instant::now();
+    for _ in 0..hw_iterations {
+        let snap = engine.sample_thermal_fast();
+        black_box(snap);
+    }
+    let hw_elapsed_us = start_hw.elapsed().as_micros() as f64;
+    let us_per_hw = hw_elapsed_us / hw_iterations as f64;
+
+    println!("🧮 [1] Full Cyber-Physical Pipeline (EKF + ML + Control):");
+    println!("  • Iterations  : 10,000,000 evaluations");
+    println!("  • Latency     : {:.2} nanoseconds (ns) / evaluation", ns_per_pipe);
+    println!("  • Throughput  : {:.2} million evaluations / second", 1000.0 / ns_per_pipe);
+    println!();
+    println!("⚡ [2] Pure eSIMD Vector EKF Math Step:");
+    println!("  • Iterations  : 10,000,000 evaluations");
+    println!("  • Latency     : {:.2} nanoseconds (ns) / step", ns_per_ekf);
+    println!("  • Throughput  : {:.2} million steps / second", 1000.0 / ns_per_ekf);
+    println!();
+    println!("📡 [3] Kernel POSIX Sysfs Hardware Polling (5 Raw Files):");
+    println!("  • Iterations  : 10,000 hardware polls");
+    println!("  • Latency     : {:.2} microseconds (μs) / poll", us_per_hw);
+    println!("  • Throughput  : {:.0} hardware polls / second", 1_000_000.0 / us_per_hw);
+    println!("=========================================================");
 }
 
 fn print_live_status() {
@@ -108,15 +166,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE);
     }
 
-    // Explicit Real-Time SCHED_RR Priority 99 Kernel Scheduling
+    // Set high process priority (Nice=-10) without Real-Time SCHED_RR starvation
     unsafe {
-        let param = libc::sched_param { sched_priority: 99 };
-        let ret = libc::sched_setscheduler(0, libc::SCHED_RR, &param);
-        if ret == 0 {
-            println!("   Linux Real-Time SCHED_RR Priority 99: ACTIVE");
-        } else {
-            println!("   Warning: Could not set SCHED_RR priority (ret={})", ret);
-        }
+        libc::setpriority(libc::PRIO_PROCESS, 0, -10);
     }
 
     if args.benchmark {
@@ -133,7 +185,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("🚀 Sending Native zbus D-Bus Fan Override Command: {target_rpm} RPM...");
         let mut dbus_client = MbpFanDbusClient::new().await;
         dbus_client.set_override(target_rpm).await;
-        set_hardware_sysfs_override(target_rpm);
+        set_hardware_sysfs_override(target_rpm, target_rpm > 800);
         println!("✅ Target RPM override applied successfully via zbus IPC.");
         return Ok(());
     }
@@ -207,12 +259,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Load thermal control parameters hierarchically via Figment (/etc/mpro.conf, MPRO_* env, CLI flags)
+    let mut thermal_config = ThermalConfig::load(Some(&args.config));
+    if let Some(ns) = args.night_start {
+        thermal_config.night_start_hour = ns.min(23);
+    }
+    if let Some(ne) = args.night_end {
+        thermal_config.night_end_hour = ne.min(23);
+    }
+
     // WORKER TASK 4: High-Frequency Zero-Copy Microsecond Control Loop
     let interval_secs = args.interval;
     let is_daemon = args.daemon;
     let running_flag = running.clone();
 
-    set_hardware_sysfs_override(800);
+    set_hardware_sysfs_override(800, false);
     let mut dbus_client = MbpFanDbusClient::new().await;
     dbus_client.set_override(800).await;
 
@@ -233,7 +294,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let (tn0d_est, dt_tn0d_est) = ekf.update(snap.tn0d_temp);
             let hazard = hazard_rx.borrow().clone();
 
-            let decision = compute_cyber_physical_control(tn0d_est, dt_tn0d_est, snap.cpu0_temp, &hazard);
+            let decision = compute_cyber_physical_control_with_config(
+                tn0d_est,
+                dt_tn0d_est,
+                snap.cpu0_temp,
+                &hazard,
+                &thermal_config,
+            );
             let mut current_level = decision.alert_level;
             let desired_rpm = decision.desired_rpm;
 
@@ -252,7 +319,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Native zbus D-Bus IPC method call (< 50 μs)
             dbus_client.set_override(current_target_rpm).await;
-            set_hardware_sysfs_override(current_target_rpm);
+            set_hardware_sysfs_override(current_target_rpm, decision.enable_manual);
 
             let ts = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
