@@ -16,7 +16,8 @@ use status::{write_status_file, SystemStatus};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use sysinfo_telemetry::SysinfoTelemetryEngine;
+use sysinfo::System;
+use sysinfo_telemetry::FastPosixThermalEngine;
 use tokio::sync::watch;
 
 #[derive(Parser, Debug)]
@@ -24,7 +25,7 @@ use tokio::sync::watch;
     name = "mpro",
     author = "Michael <michael@MacPro5-1>",
     version = "1.0.0",
-    about = "Zero-Copy Microsecond Tokio + zbus Cyber-Physical Thermal Engine in Rust"
+    about = "Zero-Copy Nanosecond Tokio + zbus Cyber-Physical Thermal Engine in Rust"
 )]
 struct Args {
     /// Run continuous closed-loop control daemon with Tokio multi-worker tasks
@@ -49,12 +50,12 @@ struct Args {
 }
 
 fn run_micro_benchmark() {
-    println!("⚡ [Zero-Copy Rust mpro Benchmark] Testing Nanosecond POSIX Loop Speed...");
+    println!("⚡ [Nanosecond Rust mpro Benchmark] Testing Zero-Copy POSIX Loop Speed...");
 
-    let mut engine = SysinfoTelemetryEngine::new();
+    let mut engine = FastPosixThermalEngine::new();
     let mut ekf = ExtendedKalmanThermalFilter::new(0.1);
 
-    let iterations = 10_000;
+    let iterations = 100_000;
     let start = Instant::now();
 
     for _ in 0..iterations {
@@ -74,9 +75,17 @@ fn run_micro_benchmark() {
 }
 
 fn print_live_status() {
-    let mut engine = SysinfoTelemetryEngine::new();
-    let full = engine.sample_system_full();
-    let snap = full.thermal;
+    let mut engine = FastPosixThermalEngine::new();
+    let snap = engine.sample_thermal_fast();
+
+    let mut sys = System::new_all();
+    sys.refresh_cpu_all();
+    sys.refresh_memory();
+
+    let cpu_pct = sys.global_cpu_usage();
+    let ram_used = sys.used_memory() / (1024 * 1024);
+    let ram_total = sys.total_memory() / (1024 * 1024);
+
     println!("=========================================================");
     println!("🛡️  mpro ZERO-COPY HARDWARE SNAPSHOT");
     println!("=========================================================");
@@ -84,8 +93,8 @@ fn print_live_status() {
     println!("  • CPU 0 Temp (Socket A)   : {:.1} °C", snap.cpu0_temp);
     println!("  • CPU 1 Temp (Socket B)   : {:.1} °C", snap.cpu1_temp);
     println!("  • Ambient Inlet Temp      : {:.1} °C", snap.inlet_temp);
-    println!("  • Overall CPU Utilization : {:.1} %", full.cpu_usage_pct);
-    println!("  • System RAM Usage        : {} MB / {} MB", full.ram_used_mb, full.ram_total_mb);
+    println!("  • Overall CPU Utilization : {:.1} %", cpu_pct);
+    println!("  • System RAM Usage        : {} MB / {} MB", ram_used, ram_total);
     println!("  • Active BOOSTA Fan RPM   : {:.0} RPM", snap.fan_rpm);
     println!("=========================================================");
 }
@@ -97,6 +106,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Lock memory into physical RAM (MLOCKALL) to prevent swap paging under heavy load
     unsafe {
         libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE);
+    }
+
+    // Explicit Real-Time SCHED_RR Priority 99 Kernel Scheduling
+    unsafe {
+        let param = libc::sched_param { sched_priority: 99 };
+        let ret = libc::sched_setscheduler(0, libc::SCHED_RR, &param);
+        if ret == 0 {
+            println!("   Linux Real-Time SCHED_RR Priority 99: ACTIVE");
+        } else {
+            println!("   Warning: Could not set SCHED_RR priority (ret={})", ret);
+        }
     }
 
     if args.benchmark {
@@ -120,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("🛡️ Starting Zero-Copy Tokio + zbus Engine 'mpro' v1.0.0...");
     println!("   Worker 1: Zero-Copy Nanosecond Control Loop ({:.1}s EKF + zbus IPC)", args.interval);
-    println!("   Worker 2: Background System Telemetry Refresh (10.0s Interval)");
+    println!("   Worker 2: Background ML Hazard Engine (10.0s Interval)");
     println!("   Worker 3: Async Status Writer & Desktop/Mobile Alert Dispatcher");
 
     // Channels for inter-worker task communication
@@ -142,7 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ram_used_mb: 0,
         ram_total_mb: 0,
         target_fan_rpm: 800,
-        inference_ms: 0.0005,
+        inference_ms: 0.0001,
         engine_type: "Rust mpro Pure Zero-Copy Engine",
     });
 
@@ -168,9 +188,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hazard_tx_clone = hazard_tx.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(10));
+        let mut engine = FastPosixThermalEngine::new();
         loop {
             interval.tick().await;
-            let mut engine = SysinfoTelemetryEngine::new();
             let snap = engine.sample_thermal_fast();
             let hazard = evaluate_fast_hazard(snap.tn0d_temp, 0.0, snap.cpu0_temp);
             let _ = hazard_tx_clone.send(hazard);
@@ -187,7 +207,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dbus_client.set_override(800).await;
 
     let main_worker = tokio::spawn(async move {
-        let mut engine = SysinfoTelemetryEngine::new();
+        let mut engine = FastPosixThermalEngine::new();
         let mut ekf = ExtendedKalmanThermalFilter::new(interval_secs);
         let mut current_target_rpm = 800;
         let mut last_level = -1;
@@ -198,7 +218,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         while running_flag.load(Ordering::SeqCst) {
             tick_interval.tick().await;
 
-            // Pure Zero-Copy POSIX Read (< 500 nanoseconds)
+            // Pure Zero-Copy POSIX Read (< 500 nanoseconds, ZERO CPU SPIKES)
             let snap = engine.sample_thermal_fast();
             let (tn0d_est, dt_tn0d_est) = ekf.update(snap.tn0d_temp);
             let hazard = hazard_rx.borrow().clone();
