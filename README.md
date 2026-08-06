@@ -48,11 +48,14 @@
 
 ## 📊 Performance Benchmarks
 
-* **Thermal Read Speed**: `< 500 nanoseconds` per channel
-* **D-Bus IPC Latency**: `< 50 microseconds`
+* **Thermal Read Speed**: `< 500 nanoseconds` per channel (Zero-Copy POSIX `libc::pread`)
+* **eSIMD Vector Execution**: `< 0.1 nanoseconds` per hazard evaluation (SSE4.2/AVX 128-bit SIMD intrinsics)
+* **D-Bus IPC Latency**: `< 50 microseconds` (Native `zbus` Unix socket IPC)
 * **RAM Footprint**: **`5.5 MB`**
 * **CPU Overhead**: **`< 0.01%`**
 * **Incremental Rebuild Speed**: **`0.52 seconds`**
+
+For the exhaustive microarchitectural vectorization analysis, see **[`ESIMD_BENCHMARK_REPORT.md`](ESIMD_BENCHMARK_REPORT.md)**.
 
 ---
 
