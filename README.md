@@ -46,6 +46,21 @@
 
 ---
 
+## 🏛️ Architectural Decision Matrix
+
+Use this decision matrix to evaluate the optimal thermal control solution based on your operational requirements:
+
+| Deployment Scenario & Criteria | TG Pro / MFC / iStat | Stock `mbpfan` | **`mpro` (Rust Engine)** | Optimal Decision & Justification |
+|---|---|---|---|---|
+| **Linux Production Server / Workstation** | ❌ Incompatible | 🟡 Basic | **🟢 Optimal** | **`mpro`**: Only solution with real-time Linux `SCHED_RR` Priority 99, zero-copy sysfs, and `zbus` IPC. |
+| **Mac Pro 4,1 / 5,1 Heavy Workloads** | 🟡 macOS only | ❌ Vulnerable | **🟢 Optimal** | **`mpro`**: Prevents Northbridge ($T_{\text{TN0D}}$) lockups via 2D EKF derivative slope prediction ($\frac{dT}{dt}$). |
+| **Acoustic Silence Requirement** | 🟡 Moderate | ❌ Poor | **🟢 Optimal** | **`mpro`**: Enforces $-150\text{ RPM/sec}$ exponential decay hysteresis to eliminate fan acoustic whine. |
+| **Headless / Unattended Server Mode** | ❌ Requires GUI login | 🟢 Good | **🟢 Optimal** | **`mpro`**: Headless systemd service with mobile push webhooks (Google Chat) and desktop alerts. |
+| **Ultra-Low Overhead (< 10MB RAM)** | ❌ ~35–50 MB | 🟢 ~3.8 MB | **🟢 ~5.5 MB** | **`mpro`**: Consumes `< 0.01% CPU` and `5.5 MB RAM` with zero garbage collection pauses. |
+| **macOS Native GUI User Interface** | 🟢 Ideal | ❌ Incompatible | ❌ Incompatible | **TG Pro / MFC**: Recommended native GUI apps if booted into macOS. |
+
+---
+
 ## 📊 Public Mac Fan & Temperature Management Comparison
 
 | Feature / Capability | TG Pro (macOS) | Macs Fan Control (macOS/Win) | iStat Menus (macOS) | Stock `mbpfan` (Linux) | **`mpro` (Linux Rust Engine)** |
