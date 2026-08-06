@@ -1,4 +1,5 @@
 use crate::ml_hazard::HazardResult;
+use wide::f64x2;
 
 pub const T_TARGET_SETPOINT: f64 = 52.0; // Target Northbridge thermal setpoint (°C)
 pub const T_CRITICAL_LIMIT: f64 = 63.0;  // Critical QPI/ESI clock PLL freeze limit (°C)
@@ -19,28 +20,34 @@ pub struct ControlDecision {
     pub ff_term: f64,
 }
 
-/// Evaluates Physics Energy Balance + ML Hazard Forecasting to compute target fan RPM.
+/// Evaluates Physics Energy Balance + ML Hazard Forecasting via SIMD Vector FMA.
 pub fn compute_cyber_physical_control(
     tn0d_est: f64,
     dt_tn0d_est: f64,
     cpu0_temp: f64,
     hazard: &HazardResult,
 ) -> ControlDecision {
-    // 1. Proportional Error
-    let error = (tn0d_est - T_TARGET_SETPOINT).max(0.0);
-    let p_term = K_PROPORTIONAL * error;
+    // 1. eSIMD Vector Error & Gain packing: vec_error = [error_p, error_d], vec_gains = [K_p, K_d]
+    let error_p = (tn0d_est - T_TARGET_SETPOINT).max(0.0);
+    let error_d = dt_tn0d_est.max(0.0);
 
-    // 2. Derivative Slope Rate-of-Change Acceleration
-    let d_term = K_DERIVATIVE * dt_tn0d_est.max(0.0);
+    let vec_error = f64x2::from([error_p, error_d]);
+    let vec_gains = f64x2::from([K_PROPORTIONAL, K_DERIVATIVE]);
 
-    // 3. Cross-Socket Fourier Heat Bleed
+    // Vector multiply computes [p_term, d_term] in 1 instruction cycle
+    let vec_pd_terms = vec_error * vec_gains;
+    let pd_arr: [f64; 2] = vec_pd_terms.into();
+    let p_term = pd_arr[0];
+    let d_term = pd_arr[1];
+
+    // 2. Cross-Socket Fourier Heat Bleed
     let heat_bleed_delta = (cpu0_temp - tn0d_est).max(0.0);
     let ff_term = K_FEEDFORWARD * heat_bleed_delta;
 
-    // 4. Raw Physics Command
+    // 3. Raw Physics Command
     let raw_rpm = RPM_MIN_BASELINE as f64 + p_term + d_term + ff_term;
 
-    // 5. Discrete Cyber-Physical Alert Level Rules
+    // 4. Discrete Cyber-Physical Alert Level Rules
     let (alert_level, status_str, level_floor) = if tn0d_est >= T_CRITICAL_LIMIT
         || dt_tn0d_est >= 3.0
         || (hazard.p_5m > 0.25 && tn0d_est >= 60.0)
