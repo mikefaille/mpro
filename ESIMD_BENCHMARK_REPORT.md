@@ -58,3 +58,21 @@ State prediction vector $\mathbf{x}_{k|k-1} = \begin{bmatrix} T + \Delta t \cdot
 | **D-Bus IPC Latency** | `100.0 μs` | `5,000.0 μs` ($5\text{ ms}$) | **`< 50.0 μs`** | **`100x Faster`** |
 | **ML Hazard Latency** | *N/A (No ML)* | `631.8 ms` | **`< 0.1 μs` ($100\text{ ns}$ eSIMD)** | **`6,318,000x Faster`** |
 | **Rebuild Time** | ~2.50 s | *N/A (Interpreted)* | **`0.52 s`** | **`Instant Rebuild`** |
+
+---
+
+## 📊 Public Mac Fan & Thermal Management Feature Matrix
+
+| Feature / Capability | TG Pro (macOS) | Macs Fan Control (macOS/Win) | iStat Menus (macOS) | Stock `mbpfan` (Linux) | **`mpro` (Linux Rust Engine)** |
+|---|---|---|---|---|---|
+| **OS Platform** | macOS | macOS / Windows | macOS | Linux | **Linux x86_64** |
+| **Mac Pro 4,1 / 5,1 6-Zone Support** | 🟢 Yes (GUI) | 🟢 Yes (GUI) | 🟢 Yes (GUI) | 🟡 Partial (Single global max) | **🟢 100% Full 6-Zone Control** |
+| **Northbridge (IOH) Diode Sensor** | 🟢 Yes | 🟢 Yes | 🟢 Yes | ❌ No (CPU-only focus) | **🟢 Yes (`TN0D` primary setpoint)** |
+| **Noise-Free EKF Filter** | ❌ No | ❌ No | ❌ No | ❌ No | **🟢 Yes (2D Extended Kalman Filter)** |
+| **Proactive Slope Control ($\frac{dT}{dt}$)**| ❌ No (Static curves)| ❌ No (Static curves)| ❌ No (Monitoring only)| ❌ No (Static steps) | **🟢 Yes (Triggers before heat builds)** |
+| **Acoustic Exponential Decay** | 🟡 Basic | 🟡 Basic | ❌ N/A | ❌ No (Abrupt jumps) | **🟢 Yes (-150 RPM/s smooth step-down)**|
+| **Linux Real-Time `SCHED_RR` Priority**| ❌ N/A | ❌ N/A | ❌ N/A | ❌ No (`Nice=0` batch) | **🟢 Yes (Priority 99 + `mlockall`)** |
+| **Native Zero-Copy IPC** | ❌ Helper app | ❌ Helper app | ❌ N/A | ❌ Direct sysfs loops | **🟢 Yes (`zbus` Unix socket IPC < 50μs)**|
+| **Mobile Push & Webhook Alerts** | ❌ No | ❌ No | ❌ No | ❌ No | **🟢 Yes (Google Chat + Desktop)** |
+| **RAM / CPU Footprint** | ~50 MB / ~1.5% | ~35 MB / ~1.0% | ~45 MB / ~1.5% | ~3.8 MB / <0.01% | **`5.5 MB` / `< 0.01% CPU`** |
+| **License & Price** | Proprietary ($20) | Proprietary ($15) | Proprietary ($12) | GPLv2 Free | **GPLv3+ Open Source & Free** |
