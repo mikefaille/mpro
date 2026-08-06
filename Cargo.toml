@@ -1,0 +1,27 @@
+[package]
+name = "mpro"
+version = "1.0.0"
+edition = "2021"
+authors = ["Michael <michael@MacPro5-1>"]
+description = "Pure Zero-Copy Tokio Async Cyber-Physical Thermal Engine in Rust"
+
+[dependencies]
+libc = "0.2"
+tokio = { version = "1.43", features = ["full"] }
+zbus = "4.4"
+sysinfo = "0.33"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.12", features = ["json"] }
+clap = { version = "4.5", features = ["derive"] }
+
+[profile.dev]
+incremental = true
+
+[profile.release]
+incremental = true
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+panic = "abort"
+strip = true
