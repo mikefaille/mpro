@@ -70,7 +70,6 @@ State prediction vector $\mathbf{x}_{k|k-1} = \begin{bmatrix} T + \Delta t \cdot
 | **Acoustic Silence Requirement** | 🟡 Moderate | ❌ Poor | **🟢 Optimal** | **`mpro`**: Enforces $-150\text{ RPM/sec}$ exponential decay hysteresis to eliminate fan acoustic whine. |
 | **Headless / Unattended Server Mode** | ❌ Requires GUI login | 🟢 Good | **🟢 Optimal** | **`mpro`**: Headless systemd service with mobile push webhooks (Google Chat) and desktop alerts. |
 | **Ultra-Low Overhead (< 10MB RAM)** | ❌ ~35–50 MB | 🟢 ~3.8 MB | **🟢 ~5.5 MB** | **`mpro`**: Consumes `< 0.01% CPU` and `5.5 MB RAM` with zero garbage collection pauses. |
-| **macOS Native GUI User Interface** | 🟢 Ideal | ❌ Incompatible | ❌ Incompatible | **TG Pro / MFC**: Recommended native GUI apps if booted into macOS. |
 
 ---
 
