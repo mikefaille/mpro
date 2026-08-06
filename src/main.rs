@@ -8,7 +8,7 @@ mod sysinfo_telemetry;
 
 use clap::Parser;
 use control::compute_cyber_physical_control;
-use dbus::{set_hardware_sysfs_override, MbpFanDbusClient};
+use dbus::{reset_all_hardware_overrides, set_hardware_sysfs_override, MbpFanDbusClient};
 use ekf::ExtendedKalmanThermalFilter;
 use ml_hazard::{evaluate_fast_hazard, HazardResult};
 use notify::{send_desktop_notification, send_gchat_notification_async};
@@ -168,13 +168,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let running = Arc::new(AtomicBool::new(true));
 
-    // WORKER TASK 1: Async Atomic JSON Status Writer
+    // WORKER TASK 1: Async Atomic JSON Status Writer (Debounced State Refresh)
     tokio::spawn(async move {
         let initial_status = *status_rx.borrow();
         write_status_file(&initial_status);
+        let mut last_alert = initial_status.alert_level;
+        let mut last_write_ts = initial_status.timestamp;
+
         while status_rx.changed().await.is_ok() {
             let status = *status_rx.borrow_and_update();
-            write_status_file(&status);
+            let now_ts = status.timestamp;
+
+            // Debounced atomic write: trigger immediately on alert level changes, or every 5s on idle
+            if status.alert_level != last_alert || (now_ts - last_write_ts >= 5) {
+                write_status_file(&status);
+                last_alert = status.alert_level;
+                last_write_ts = now_ts;
+            }
         }
     });
 
@@ -305,9 +315,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             println!("\n🛑 Intercepted SIGINT/SIGTERM via Tokio. Cleaning up hardware fan overrides via zbus...");
-            let mut cleanup_client = MbpFanDbusClient::new().await;
-            cleanup_client.reset().await;
-            set_hardware_sysfs_override(800);
+            reset_all_hardware_overrides();
         }
         _ = main_worker => {}
     }

@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use zbus::Connection;
 
 static LAST_SENT_RPM: AtomicI32 = AtomicI32::new(-1);
+static LAST_SYSFS_RPM: AtomicI32 = AtomicI32::new(-1);
 
 /// Physical maximum RPM bounds per fan zone on Mac Pro 5,1
 pub const FAN_MAX_BOOSTA: i32 = 5200; // fan5 BOOSTA
@@ -63,13 +64,20 @@ impl MbpFanDbusClient {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn reset(&mut self) {
         self.set_override(800).await;
     }
 }
 
-/// Secondary hardware safety bus: updates AppleSMC sysfs registers across ALL 6 chassis fan zones.
+/// Secondary hardware safety bus with state deduplication:
+/// Eliminates 12 file open/write/close syscalls per second during steady state.
 pub fn set_hardware_sysfs_override(target_rpm: i32) {
+    let last = LAST_SYSFS_RPM.load(Ordering::Relaxed);
+    if target_rpm == last {
+        return; // Fast-path: skip duplicate sysfs file open/close cycles
+    }
+
     let smc_path = Path::new("/sys/devices/platform/applesmc.768");
     if !smc_path.exists() {
         return;
@@ -103,4 +111,12 @@ pub fn set_hardware_sysfs_override(target_rpm: i32) {
             }
         }
     }
+    LAST_SYSFS_RPM.store(target_rpm, Ordering::Relaxed);
+}
+
+/// Reset all hardware fan overrides back to automatic mode cleanly.
+pub fn reset_all_hardware_overrides() {
+    LAST_SENT_RPM.store(-1, Ordering::Relaxed);
+    LAST_SYSFS_RPM.store(-1, Ordering::Relaxed);
+    set_hardware_sysfs_override(800);
 }
