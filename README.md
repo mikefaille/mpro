@@ -123,8 +123,8 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/mpro
-ExecStart=/opt/mpro/target/release/mpro --daemon
+WorkingDirectory=/var/lib/mpro
+ExecStart=/usr/local/bin/mpro --daemon
 Restart=always
 RestartSec=1s
 TimeoutStopSec=3s
@@ -135,7 +135,7 @@ CPUSchedulingPolicy=rr
 CPUSchedulingPriority=99
 MemoryMax=128M
 PrivateTmp=false
-ReadWritePaths=/etc/mbpfan.conf /tmp
+ReadWritePaths=/etc/mbpfan.conf /etc/mpro.conf /tmp /sys/devices/platform/applesmc.768 /var/lib/mpro
 
 [Install]
 WantedBy=multi-user.target
